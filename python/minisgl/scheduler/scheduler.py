@@ -1,3 +1,19 @@
+"""
+调度器模块
+
+Scheduler是Mini-SGLang的核心组件，负责：
+1. 接收和管理用户请求
+2. 决策何时执行prefill和decode
+3. 组batch以最大化GPU利用率
+4. 调用Engine执行模型forward
+5. 处理输出并返回给用户
+
+调度策略：
+- Continuous Batching: 动态调整batch，无需等待所有请求完成
+- Chunked Prefill: 长输入分块处理，与decode交错执行
+- Overlap Scheduling: CPU调度与GPU计算重叠，提高吞吐量
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAlias
@@ -30,8 +46,19 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
-# For overlap scheduling, we also need to cache some other data to avoid IMA
 class ForwardInput(NamedTuple):
+    """
+    Forward操作的输入数据
+    
+    为了支持重叠调度，需要缓存forward所需的所有数据，
+    避免数据在准备下一个batch时被覆盖。
+    
+    属性:
+        batch: 要执行的批次
+        sample_args: 采样参数
+        load_indices: 从token_pool加载token的索引
+        write_indices: 将生成的token写回token_pool的索引
+    """
     batch: Batch
     sample_args: BatchSamplingArgs
     load_indices: torch.Tensor
@@ -42,20 +69,55 @@ ForwardData: TypeAlias = "Tuple[ForwardInput, ForwardOutput]"
 
 
 class Scheduler(SchedulerIOMixin):
+    """
+    调度器主类
+    
+    负责整个推理系统的请求调度和资源管理。继承自SchedulerIOMixin
+    以获得与Tokenizer/Detokenizer的通信能力。
+    
+    主要职责:
+    1. 请求管理：接收新请求，维护等待队列和运行队列
+    2. 批次调度：决定哪些请求组成batch，是prefill还是decode
+    3. 资源分配：管理KV Cache、page table等GPU资源
+    4. 执行协调：调用Engine执行模型计算
+    5. 结果处理：处理输出token，判断是否完成，返回给用户
+    
+    核心管理器:
+    - table_manager: 管理请求表和token池
+    - cache_manager: 管理KV Cache（Radix或Naive）
+    - prefill_manager: 管理待prefill的请求
+    - decode_manager: 管理正在decode的请求
+    - engine: 执行模型forward的引擎
+    
+    调度模式:
+    - overlap_loop: 重叠调度模式（默认，高性能）
+    - normal_loop: 正常调度模式（用于调试）
+    """
+    
     def __init__(self, config: SchedulerConfig):
+        """
+        初始化调度器
+        
+        参数:
+            config: 调度器配置，包含模型路径、最大batch size等参数
+        """
         from minisgl.engine import Engine
 
+        # 初始化推理引擎
         self.engine = Engine(config)
-        # Initialize the I/O mixin
+        
+        # 初始化I/O通信（与Tokenizer/Detokenizer）
         super().__init__(config, self.engine.tp_cpu_group)
 
-        # use another stream to overlap metadata processing with computation
+        # 创建单独的CUDA stream用于重叠调度
+        # self.stream: 用于CPU端的元数据处理
+        # self.engine.stream: 用于GPU计算
         self.device = self.engine.device
         self.stream = torch.cuda.Stream(device=self.device)
         self.engine_stream_ctx = torch.cuda.stream(self.engine.stream)
         torch.cuda.set_stream(self.stream)
 
-        # initialize other managers
+        # 初始化各个管理器
         self.table_manager = TableManager(config.max_running_req, self.engine.page_table)
         self.cache_manager = CacheManager(self.device, self.engine.num_pages, config.cache_type)
         self.decode_manager = DecodeManager()
@@ -63,14 +125,15 @@ class Scheduler(SchedulerIOMixin):
             self.cache_manager, self.table_manager, self.decode_manager
         )
 
+        # 其他配置
         self.tp_info = config.tp_info
-        self.finished_reqs: Set[Req] = set()
+        self.finished_reqs: Set[Req] = set()  # 已完成但可能还在使用中的请求
         self.tokenizer = AutoTokenizer.from_pretrained(config.model_path)
         self.eos_token_id = self.tokenizer.eos_token_id
         self.page_table = self.engine.page_table
         self.token_pool = self.table_manager.token_pool
         self.prefill_budget = config.max_extend_tokens
-        self.dummy_write_2d_pos = (self.engine.dummy_req.table_idx, 1, 2)  # 0 for load, 1 for write
+        self.dummy_write_2d_pos = (self.engine.dummy_req.table_idx, 1, 2)
 
     def _process_last_data(
         self, last_data: ForwardData | None, ongoing_data: ForwardData | None

@@ -142,5 +142,14 @@ python3 -m sglang.launch_server --model "Qwen/Qwen3-32B" --tp 4 \
 
 ## 📚 Learn More
 
+### English Documentation
+
 - **[Detailed Features](./docs/features.md)**: Explore all available features and command-line arguments.
 - **[System Architecture](./docs/structures.md)**: Dive deep into the design and data flow of Mini-SGLang.
+
+### 中文文档 (Chinese Documentation)
+
+- **[中文安装和使用指南](./docs/zh/README_ZH.md)**: 详细的中文安装、配置和使用教程
+- **[核心概念详解](./docs/zh/concepts.md)**: 深入讲解大模型推理的核心技术和原理
+- **[开发者指南](./docs/zh/developer.md)**: 面向开发者的代码结构、调试技巧和贡献指南
+- **[文档总结](./docs/zh/SUMMARY.md)**: 中文文档和代码注释的完整说明
