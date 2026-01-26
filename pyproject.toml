@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "minisgl"
 version = "0.1.0"
-description = "What is this?"
+description = "A lightweight yet high-performance inference framework for Large Language Models"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -22,31 +22,47 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "accelerate",
-    "msgpack",
-    "sgl_kernel>=0.3.17.post1",
-    "torch",
-    "transformers>=4.56.0,<=4.57.3",
-    "flashinfer-python>=0.5.3",
-    "pyzmq",
-    "uvicorn",
-    "fastapi",
-    "prompt_toolkit",
-    "openai",
-    "apache-tvm-ffi>=0.1.4",
-    "nvidia-cutlass-dsl==4.3.1",
+    # 深度学习框架
+    "torch>=2.0.0,<2.6.0",                  # PyTorch 核心框架
+    "transformers>=4.56.0,<=4.57.3",        # HuggingFace Transformers
+    "accelerate>=0.34.0",                    # 分布式训练和推理加速
+    
+    # CUDA 和 GPU 优化
+    "sgl_kernel>=0.3.17.post1",             # SGLang 自定义 CUDA 内核
+    "flashinfer-python>=0.5.3",             # FlashInfer 注意力优化内核
+    "nvidia-cutlass-dsl==4.3.1",            # NVIDIA CUTLASS DSL
+    "apache-tvm-ffi>=0.1.4",                # Apache TVM FFI
+    
+    # Web 服务
+    "fastapi>=0.115.0",                      # FastAPI Web 框架
+    "uvicorn>=0.32.0",                       # ASGI 服务器
+    "openai>=1.57.4",                        # OpenAI API 客户端
+    
+    # 数据序列化和通信
+    "msgpack>=1.1.0",                        # MessagePack 序列化
+    "pyzmq>=26.2.0",                         # ZeroMQ Python 绑定
+    
+    # 命令行界面
+    "prompt_toolkit>=3.0.36",                # 交互式命令行界面
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=6.0",
-    "pytest-cov>=2.0",
-    "black>=22.0",
-    "flake8>=4.0",
-    "mypy>=0.950",
-    "pre-commit>=3.0.0",
-    "ruff>=0.11.0",
-    "matplotlib>=3.10.5",
+    # 测试工具
+    "pytest>=8.3.0",                         # 单元测试框架
+    "pytest-cov>=6.0.0",                     # 测试覆盖率
+    "pytest-asyncio>=0.24.0",                # 异步测试支持
+    
+    # 代码质量和格式化
+    "black>=24.8.0",                         # 代码格式化工具
+    "ruff>=0.11.0",                          # 快速 Python linter
+    "flake8>=7.1.0",                         # 代码风格检查
+    "mypy>=1.13.0",                          # 静态类型检查
+    "pre-commit>=4.0.0",                     # Git 预提交钩子
+    
+    # 性能分析和可视化
+    "matplotlib>=3.10.5",                    # 绘图和可视化
+    "numpy>=1.26.0",                         # 数值计算
 ]
 
 [tool.setuptools]

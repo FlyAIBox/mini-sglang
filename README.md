@@ -491,10 +491,17 @@ python3 -m sglang.launch_server --model "Qwen/Qwen3-32B" --tp 4 \
 
 ## 📚 Learn More
 
+### 📖 Documentation Index
+
+- **[📑 Complete Documentation Index](./DOCUMENTATION_INDEX.md)**: Find all documentation organized by topic and use case.
+
 ### English Documentation
 
-- **[Detailed Features](./docs/features.md)**: Explore all available features and command-line arguments.
-- **[System Architecture](./docs/structures.md)**: Dive deep into the design and data flow of Mini-SGLang.
+- **[📦 Dependencies Summary](./DEPENDENCIES_SUMMARY.md)**: Quick reference for package versions and installation commands.
+- **[📋 Dependencies Guide](./DEPENDENCIES.md)**: Complete guide to all dependencies, versions, and installation troubleshooting.
+- **[📊 Dependencies Version Table](./DEPENDENCIES_VERSION_TABLE.md)**: Version compatibility matrix and upgrade suggestions.
+- **[✨ Detailed Features](./docs/features.md)**: Explore all available features and command-line arguments.
+- **[🏗️ System Architecture](./docs/structures.md)**: Dive deep into the design and data flow of Mini-SGLang.
 
 ### 中文文档 (Chinese Documentation)
 
