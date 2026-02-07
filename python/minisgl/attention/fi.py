@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import math
@@ -36,23 +37,32 @@ logger = init_logger(__name__)
 
 @dataclass
 class FICaptureData(BaseCaptureData):
+    """用于 FlashInfer CUDA Graph Capture 的数据容器"""
     @property
     def one_tensor(self) -> torch.Tensor:
+        # FlashInfer 需要 last_page_len参数，在 Decode 阶段通常全为 1
         return self.seq_lens
 
     @property
     def indices(self) -> torch.Tensor:
+        # 复用 page_table 作为 ragged indices
         return self.page_table
 
 
 @dataclass
 class FIMetadata(BaseAttnMetadata):
+    """
+    FlashInfer 元数据
+    
+    FlashInfer 需要特定的参数来规划 (Plan) 和执行注意力计算。
+    区分 CPU 和 GPU 上的 tensors。
+    """
     # fmt: off
-    cu_seqlens_q_cpu:   torch.Tensor  # on cpu
+    cu_seqlens_q_cpu:   torch.Tensor  # on cpu (Prefill)
     cu_seqlens_k_cpu:   torch.Tensor  # on cpu
-    cu_seqlens_q_gpu:   torch.Tensor  # on gpu
-    indices:            torch.Tensor  # on gpu
-    last_page_len_cpu:  torch.Tensor  # on cpu
+    cu_seqlens_q_gpu:   torch.Tensor  # on gpu (用于 get_last_indices)
+    indices:            torch.Tensor  # on gpu (Ragged Paged KV Indices)
+    last_page_len_cpu:  torch.Tensor  # on cpu (每个序列最后一页的有效长度)
     num_qo_heads:       int
     num_kv_heads:       int
     head_dim:           int
@@ -60,6 +70,8 @@ class FIMetadata(BaseAttnMetadata):
     pos_encoding_mode:  str
     seq_lens_cpu:       torch.Tensor  # on cpu
     dtype:              torch.dtype
+    
+    # FlashInfer Wrapper (BatchPrefill 或 BatchDecode)
     wrapper:            BatchPrefillWithPagedKVCacheWrapper | BatchDecodeWithPagedKVCacheWrapper
     initialized:        bool = False
     # fmt: on
@@ -84,6 +96,12 @@ class FIMetadata(BaseAttnMetadata):
 
 
 class FlashInferBackend(BaseAttnBackend):
+    """
+    FlashInfer 后端
+    
+    主要用于 Decode 阶段，支持 PagedAttention，显存利用率高。
+    也支持 Prefill，但通常配合 FlashAttention 使用 Hybrid 模式。
+    """
     def __init__(
         self,
         config: ModelConfig,
@@ -98,9 +116,13 @@ class FlashInferBackend(BaseAttnBackend):
         self.config = config
         self.kvcache = kvcache
         self.device = kvcache.device
+        
+        # FlashInfer 需要 workspace buffer
         self.float_workspace_buffer = torch.empty(
             128 * 1024 * 1024, dtype=torch.uint8, device=self.device
         )
+        
+        # 初始化 Wrappers
         self.prefill_wrapper = BatchPrefillWithPagedKVCacheWrapper(
             self.float_workspace_buffer,
             kv_layout="NHD",
@@ -113,6 +135,7 @@ class FlashInferBackend(BaseAttnBackend):
         )
 
         # NOTE: some hack to reuse the int_workspace_buffer
+        # 复用 int workspace 以节省显存
         self.int_workspace_buffer = self.prefill_wrapper._int_workspace_buffer
         self.decode_wrappers._int_workspace_buffer = self.int_workspace_buffer
 
@@ -131,6 +154,12 @@ class FlashInferBackend(BaseAttnBackend):
 
     @staticmethod
     def _initialize_metadata_once(metadata: FIMetadata) -> None:
+        """
+        初始化 FlashInfer Metadata (Wrapper Plan)
+        
+        调用 FlashInfer 的 `plan` 方法，预计算辅助数据结构。
+        对于 Decode 阶段，这个开销在 Graph Replay 时可以被消除。
+        """
         if metadata.initialized:
             return
 
@@ -138,6 +167,7 @@ class FlashInferBackend(BaseAttnBackend):
 
         metadata.initialized = True
         if isinstance(metadata.wrapper, BatchDecodeWithPagedKVCacheWrapper):
+            # Decode Plan
             metadata.wrapper.plan(
                 indptr=metadata.cu_seqlens_k_cpu,
                 indices=metadata.indices,
@@ -154,6 +184,7 @@ class FlashInferBackend(BaseAttnBackend):
                 non_blocking=True,
             )
         else:
+            # Prefill Plan
             metadata.wrapper.plan(
                 qo_indptr=metadata.cu_seqlens_q_cpu,
                 paged_kv_indptr=metadata.cu_seqlens_k_cpu,
@@ -172,6 +203,7 @@ class FlashInferBackend(BaseAttnBackend):
             )
 
     def _get_ones_cpu(self, bs: int) -> torch.Tensor:
+        """获取全 1 张量 (cached, pinned memory)"""
         if bs <= len(self.cached_ones_cpu):
             return self.cached_ones_cpu[:bs]
         # padding to next pow of 2
@@ -182,14 +214,26 @@ class FlashInferBackend(BaseAttnBackend):
     def forward(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, layer_id: int, batch: Batch
     ) -> torch.Tensor:
+        """执行 Attention 计算"""
         metadata = batch.attn_metadata
         assert isinstance(metadata, FIMetadata)
+        # 确保 Plan 已执行
         self._initialize_metadata_once(metadata)
+        
+        # 存 KV Cache
         self.kvcache.store_kv(k, v, batch.out_loc, layer_id)
         kv_cache = (self.kvcache.k_cache(layer_id), self.kvcache.v_cache(layer_id))
+        
+        # 执行计算 (BatchDecode 或 BatchPrefill)
         return metadata.wrapper.run(q=q, paged_kv_cache=kv_cache)
 
     def prepare_metadata(self, batch: Batch) -> None:
+        """
+        准备 FlashInfer 元数据
+        
+        主要工作是构建 ragged indices (Pged KV Indices) 和相关的 lengths 信息。
+        FlashInfer 使用 ragged array 来表示 Paged KV Cache。
+        """
         reqs = batch.padded_reqs
 
         padded_size = len(reqs)
@@ -202,24 +246,27 @@ class FlashInferBackend(BaseAttnBackend):
         device = self.device
         seq_len_cpu = torch.tensor(seqlens_k, **cpu_kwargs)
         cu_seqlens_k_cpu = torch.tensor([0] + seqlens_k, **cpu_kwargs).cumsum_(dim=0)
+        
         if max_seqlen_q == 1:  # decode with all extend_len = 1
             cu_seqlens_q_cpu = torch.arange(0, padded_size + 1, **cpu_kwargs)
         elif all(l == 0 for l in cached_lens):  # prefill with no cache hit
             cu_seqlens_q_cpu = cu_seqlens_k_cpu
         else:  # normal extend prefill, with partial cache hit
             cu_seqlens_q_cpu = torch.tensor([0] + seqlens_q, **cpu_kwargs).cumsum_(dim=0)
+            
         batch.attn_metadata = FIMetadata(
             positions=make_positions(device, reqs),
             cu_seqlens_q_cpu=cu_seqlens_q_cpu,
             cu_seqlens_k_cpu=cu_seqlens_k_cpu,
             cu_seqlens_q_gpu=cu_seqlens_q_cpu.to(device, non_blocking=True),
+            # 构建 ragged indices: 将每个请求的 page indices 拼接起来
             indices=torch.cat([self.page_table[req.table_idx, : req.device_len] for req in reqs]),
             last_page_len_cpu=self._get_ones_cpu(padded_size),
             num_qo_heads=self.qo_head_local,
             num_kv_heads=self.kv_head_local,
             head_dim=self.config.head_dim,
             page_size=1,
-            pos_encoding_mode="NONE",
+            pos_encoding_mode="NONE", # RoPE has been applied before attention
             seq_lens_cpu=seq_len_cpu,
             dtype=self.kvcache.dtype,
             wrapper=self.decode_wrappers if batch.is_decode else self.prefill_wrapper,
@@ -236,6 +283,7 @@ class FlashInferBackend(BaseAttnBackend):
 
     @cached_property
     def use_tensor_cores(self) -> bool:
+        """检查是否使用 Tensor Cores (通常 GQA >= 4 时启用)"""
         if (overriden_value := ENV.FLASHINFER_USE_TENSOR_CORES.value) is not None:
             logger.warning(f"Overriding FlashInfer tensor core usage to {overriden_value}")
             return overriden_value
@@ -243,12 +291,18 @@ class FlashInferBackend(BaseAttnBackend):
         return GQA >= 4
 
     def prepare_for_capture(self, batch: Batch) -> None:
+        """
+        为 Graph Capture 准备 Metadata
+        使用 CUDAGraphBatchDecodeWithPagedKVCacheWrapper 替代普通 Wrapper。
+        """
         from flashinfer import CUDAGraphBatchDecodeWithPagedKVCacheWrapper
 
         bs = batch.size
         assert bs in self.capture_bs and bs not in self.graph_wrappers and self.capture
         batch.padded_reqs = batch.reqs
         capture = self.capture
+        
+        # 初始化 CUDA Graph Wrapper
         self.graph_wrappers[bs] = CUDAGraphBatchDecodeWithPagedKVCacheWrapper(
             self.float_workspace_buffer,
             kv_layout="NHD",
@@ -268,9 +322,14 @@ class FlashInferBackend(BaseAttnBackend):
         self._initialize_metadata_once(metadata)
 
     def prepare_for_replay(self, batch: Batch) -> None:
+        """
+        为 Graph Replay 更新 Metadata
+        更新 capture buffers 并重置 wrapper。
+        """
         metadata, bs = batch.attn_metadata, batch.padded_size
         assert isinstance(metadata, FIMetadata) and not metadata.initialized
         assert self.capture is not None and bs in self.capture_bs
+        
         self.capture.input_ids[:bs].copy_(batch.input_ids)
         self.capture.out_loc[:bs].copy_(batch.out_loc)
         self.capture.positions[:bs].copy_(metadata.positions)

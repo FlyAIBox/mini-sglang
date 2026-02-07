@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -16,6 +17,18 @@ if TYPE_CHECKING:
 
 
 class AttentionLayer(StateLessOP):
+    """
+    注意力层 (Attention Layer)
+    
+    实现 Transformer 的注意力机制核心逻辑：
+    1. QKV 分割
+    2. QK Norm (可选)
+    3. Rotary Position Embedding (RoPE)
+    4. Attention 计算 (通过 Backend 调用 FlashAttention/FlashInfer)
+    
+    该层是无状态的 (StateLessOP)，因为它不包含可训练参数（参数在 Model 的 Linear 层中）。
+    它只负责计算逻辑。
+    """
     def __init__(
         self,
         layer_id: int,
@@ -26,14 +39,21 @@ class AttentionLayer(StateLessOP):
         q_norm: RMSNorm | None = None,
         k_norm: RMSNorm | None = None,
     ):
+        # 确保头数能被 KV 头数整除 (GQA/MQA 要求)
         assert num_qo_heads % num_kv_heads == 0
         self.layer_id = layer_id
         self.head_dim = head_dim
+        
+        # 获取 Tensor Parallel 大小，计算当前进程负责的头数
         tp_size = get_tp_info().size
         self.num_qo_heads = divide_even(num_qo_heads, tp_size)
         self.num_kv_heads = divide_even(num_kv_heads, tp_size)
+        
+        # 计算本地维度的总大小
         self.qo_attn_dim = self.num_qo_heads * head_dim
         self.kv_attn_dim = self.num_kv_heads * head_dim
+        
+        # 初始化 RoPE 计算器
         self.rotary = get_rope(
             head_dim=head_dim,
             rotary_dim=rotary_config.rotary_dim,
@@ -41,19 +61,42 @@ class AttentionLayer(StateLessOP):
             base=rotary_config.base,
             rope_scaling=tuple(rotary_config.scaling.items()) if rotary_config.scaling else None,
         )
+        # QK Norm (部分模型如 Qwen 需要)
         self.q_norm = q_norm
         self.k_norm = k_norm
 
     def forward(self, qkv: torch.Tensor) -> torch.Tensor:
+        """
+        前向传播
+        
+        Args:
+            qkv: 融合的 QKV 张量 [num_tokens, hidden_size + 2 * kv_hidden_size]
+        
+        Returns:
+            torch.Tensor: Attention 输出 [num_tokens, hidden_size]
+        """
         ctx = get_global_ctx()
         metadata = ctx.batch.attn_metadata
+        
+        # 1. 拆分 Q, K, V
+        # shape: [num_tokens, num_heads * head_dim]
         q, k, v = qkv.split([self.qo_attn_dim, self.kv_attn_dim, self.kv_attn_dim], dim=-1)
+        
+        # 2. QK Norm (如有)
         if self.q_norm is not None:
             self.q_norm.forward_inplace(q.view(-1, self.num_qo_heads, self.head_dim))
         if self.k_norm is not None:
             self.k_norm.forward_inplace(k.view(-1, self.num_kv_heads, self.head_dim))
+            
+        # 3. 应用 RoPE
+        # 如果是 Decode 阶段，RoPE 会使用 cached_len 计算位置
         if self.rotary:
             q, k = self.rotary.forward(metadata.positions, q, k)
+            
+        # 4. Attention 计算
+        # 调用 context 中的 backend (FlashAttention 或 FlashInfer) 执行实际计算
+        # 传入 global_context 用于获取 KV Cache 等信息
         q = q.view(-1, self.num_qo_heads, self.head_dim)
         o = ctx.attn_backend.forward(q, k, v, self.layer_id, ctx.batch)
+        
         return o.view(-1, self.qo_attn_dim)

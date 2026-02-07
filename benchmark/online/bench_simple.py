@@ -17,7 +17,14 @@ from transformers import AutoTokenizer
 logger = init_logger(__name__)
 
 
+
 async def main():
+    """
+    简单在线基准测试
+    
+    使用随机生成的 prompt 测试 API Server 的基本性能 (主要是 Throughput)。
+    不模拟真实的时间间隔，而是尽可能快地发送请求 (batch processing)。
+    """
     try:
         random.seed(42)  # reproducibility
 

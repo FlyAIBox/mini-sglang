@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -14,6 +15,12 @@ if TYPE_CHECKING:
     from tvm_ffi import Module
 
     class PyNCCLCommunicator:
+        """
+        PyNCCL 通信器接口定义
+        
+        这是 C++ NCCL Wrapper 的 Python 类型提示接口。
+        实际实现是通过 TVM FFI 加载的 C++ 对象。
+        """
         @abstractmethod
         def all_reduce(self, input: torch.Tensor, op: Literal["sum"]) -> None: ...
         @abstractmethod
@@ -27,11 +34,13 @@ else:
 
 @lru_cache(maxsize=None)
 def _load_nccl_module() -> Module:
+    """加载 NCCL C++ 模块 (AOT 编译)"""
     return load_aot("pynccl", cuda_files=["pynccl.cu"], extra_ldflags=["-lnccl"])
 
 
 @lru_cache(maxsize=None)
 def _get_pynccl_wrapper_cls():
+    """获取 PyNCCLWrapper 类 (通过 TVM FFI 注册)"""
     import tvm_ffi
 
     @tvm_ffi.register_object("minisgl.NCCLWrapper")
@@ -49,6 +58,12 @@ def init_pynccl(
     tp_cpu_group: torch.distributed.ProcessGroup,
     max_size_bytes: int = 0,
 ) -> PyNCCLCommunicator:
+    """
+    初始化 PyNCCL 通信器
+    
+    使用 PyTorch 分布式组 (Gloo/NCCL) 交换 NCCL Unique ID，
+    然后在每个进程上创建 NCCL Communicator。
+    """
     import torch
 
     max_size_bytes = min(max_size_bytes, ENV.PYNCCL_MAX_BUFFER_SIZE.value)
@@ -57,6 +72,7 @@ def init_pynccl(
     cls = _get_pynccl_wrapper_cls()
 
     if tp_rank == 0:
+        # Rank 0 创建 NCCL ID 并广播给其他 Rank
         id_list = [module.create_nccl_uid()]
         torch.distributed.broadcast_object_list(
             id_list,
@@ -64,6 +80,7 @@ def init_pynccl(
             group=tp_cpu_group,
         )
     else:
+        # 其他 Rank 接收 NCCL ID
         id_list = [None]
         torch.distributed.broadcast_object_list(
             id_list,

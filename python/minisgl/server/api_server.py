@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import asyncio
@@ -34,12 +35,14 @@ _GLOBAL_STATE = None
 
 
 def get_global_state() -> FrontendManager:
+    """获取全局前端管理器实例"""
     global _GLOBAL_STATE
     assert _GLOBAL_STATE is not None, "Global state is not initialized"
     return _GLOBAL_STATE
 
 
 def _unwrap_msg(msg: BaseFrontendMsg) -> List[UserReply]:
+    """如果消息是批量的，解包成单个消息列表"""
     if isinstance(msg, BatchFrontendMsg):
         result = []
         for reply in msg.data:
@@ -51,19 +54,24 @@ def _unwrap_msg(msg: BaseFrontendMsg) -> List[UserReply]:
 
 
 class GenerateRequest(BaseModel):
+    """简单生成请求"""
     prompt: str
     max_tokens: int
     ignore_eos: bool = False
 
 
 class Message(BaseModel):
+    """聊天消息"""
     role: Literal["system", "user", "assistant"]
     content: str
 
 
 class OpenAICompletionRequest(BaseModel):
-    """Unified request model for OpenAI-style completions and chat-completions."""
-
+    """
+    OpenAI 格式的请求模型
+    
+    统一支持 OpenAI 风格的 completions 和 chat-completions 接口。
+    """
     model: str
 
     prompt: str | None = None
@@ -84,6 +92,7 @@ class OpenAICompletionRequest(BaseModel):
 
 
 class ModelCard(BaseModel):
+    """OpenAI 格式的模型卡片"""
     id: str
     object: str = "model"
     created: int = Field(default_factory=lambda: int(time.time()))
@@ -92,12 +101,19 @@ class ModelCard(BaseModel):
 
 
 class ModelList(BaseModel):
+    """OpenAI 格式的模型列表"""
     object: str = "list"
     data: List[ModelCard] = Field(default_factory=list)
 
 
 @dataclass
 class FrontendManager:
+    """
+    前端管理器
+    
+    负责处理 API 请求，与 Tokenizer 进程通信，管理请求状态。
+    使用 AsyncIO 处理并发请求。
+    """
     config: ServerArgs
     send_tokenizer: ZmqAsyncPushQueue[BaseTokenizerMsg]
     recv_tokenizer: ZmqAsyncPullQueue[BaseFrontendMsg]
@@ -107,6 +123,7 @@ class FrontendManager:
     event_map: Dict[int, asyncio.Event] = field(default_factory=dict)
 
     def new_user(self) -> int:
+        """生成新的用户 ID 并初始化其状态"""
         uid = self.uid_counter
         self.uid_counter += 1
         self.ack_map[uid] = []
@@ -114,41 +131,59 @@ class FrontendManager:
         return uid
 
     async def listen(self):
+        """
+        后台监听循环
+        
+        从 Tokenizer 进程接收响应消息，并将其放入对应的用户队列中。
+        """
         while True:
             msg = await self.recv_tokenizer.get()
             for msg in _unwrap_msg(msg):
                 assert msg.uid in self.ack_map
                 self.ack_map[msg.uid].append(msg)
+                # 触发事件，通知等待该 UID 的协程有新消息
                 self.event_map[msg.uid].set()
 
     def _create_listener_once(self):
+        """确保监听循环只启动一次"""
         if not self.initialized:
             asyncio.create_task(self.listen())
             self.initialized = True
 
     async def send_one(self, msg: BaseTokenizerMsg):
+        """发送请求给 Tokenizer"""
         self._create_listener_once()
         await self.send_tokenizer.put(msg)
 
     async def wait_for_ack(self, uid: int):
+        """
+        等待并 yield 给定 UID 的响应
+        
+        这是一个异步生成器，用于流式传输响应。
+        """
         event = self.event_map[uid]
 
         while True:
+            # 等待新消息到达 (由 listen 循环触发)
             await event.wait()
             event.clear()
 
+            # 获取所有累积的消息
             pending = self.ack_map[uid]
             self.ack_map[uid] = []
             ack = None
             for ack in pending:
                 yield ack
+            # 如果请求已完成，退出循环
             if ack and ack.finished:
                 break
 
+        # 清理状态
         del self.ack_map[uid]
         del self.event_map[uid]
 
     async def stream_generate(self, uid: int):
+        """生成 SSE 格式的流式响应"""
         async for ack in self.wait_for_ack(uid):
             yield f"data: {ack.incremental_output}\n".encode()
             if ack.finished:
@@ -157,6 +192,7 @@ class FrontendManager:
         logger.debug("Finished streaming response for user %s", uid)
 
     async def stream_chat_completions(self, uid: int):
+        """生成 OpenAI Chat Completion 格式的流式响应"""
         first_chunk = True
         async for ack in self.wait_for_ack(uid):
             delta = {}
@@ -176,7 +212,7 @@ class FrontendManager:
             if ack.finished:
                 break
 
-        # send final finish_reason
+        # 发送结束标志
         end_chunk = {
             "id": f"cmpl-{uid}",
             "object": "text_completion.chunk",
@@ -187,6 +223,7 @@ class FrontendManager:
         logger.debug("Finished streaming response for user %s", uid)
 
     async def abort_user(self, uid: int):
+        """中止用户请求"""
         await asyncio.sleep(0.1)
         if uid in self.ack_map:
             del self.ack_map[uid]
@@ -195,12 +232,14 @@ class FrontendManager:
         logger.warning("Aborting request for user %s", uid)
 
     def shutdown(self):
+        """关闭 ZMQ 连接"""
         self.send_tokenizer.stop()
         self.recv_tokenizer.stop()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """FastAPI 生命周期管理器，处理应用启动和关闭"""
     yield
     # shutdown code here
     global _GLOBAL_STATE
@@ -213,9 +252,11 @@ app = FastAPI(title="MiniSGL API Server", version="0.0.1", lifespan=lifespan)
 
 @app.post("/generate")
 async def generate(req: GenerateRequest):
+    """简单生成接口"""
     logger.debug("Received generate request %s", req)
     state = get_global_state()
     uid = state.new_user()
+    # 发送 Tokenize 请求，开始处理流程
     await state.send_one(
         TokenizeMsg(
             uid=uid,
@@ -244,6 +285,7 @@ async def v1_root():
 
 @app.post("/v1/chat/completions")
 async def v1_completions(req: OpenAICompletionRequest):
+    """OpenAI 兼容的 Chat Completions 接口"""
     state = get_global_state()
     if req.messages:
         prompt = [msg.model_dump() for msg in req.messages]
@@ -279,11 +321,13 @@ async def v1_completions(req: OpenAICompletionRequest):
 
 @app.get("/v1/models")
 async def available_models():
+    """获取可用模型列表"""
     state = get_global_state()
     return ModelList(data=[ModelCard(id=state.config.model_path, root=state.config.model_path)])
 
 
 async def shell_completion(req: OpenAICompletionRequest):
+    """Shell 模式下的 completion 辅助函数"""
     state = get_global_state()
     assert req.messages is not None, "Shell completion only supports chat-completions"
     prompt = [msg.model_dump() for msg in req.messages]
@@ -331,6 +375,11 @@ async def async_input(prompt=""):
 
 
 async def shell():
+    """
+    交互式 Shell 循环
+    
+    允许用户在终端直接与模型对话，模拟类似 ChatGPT 的 CLI 体验。
+    """
     commands = ["/exit", "/reset"]
     completer = WordCompleter(commands)
     session = PromptSession("$ ", completer=completer)
@@ -395,7 +444,12 @@ async def shell():
 
 def run_api_server(config: ServerArgs, start_backend: Callable[[], None], run_shell: bool) -> None:
     """
-    Run the frontend API server (FastAPI + uvicorn) and wire it to the tokenizer process via ZMQ.
+    启动 API 服务器
+    
+    主要流程:
+    1. 初始化全局 FrontendManager (配置 ZMQ)
+    2. 启动后端的子进程 (Scheduler, Tokenizer)
+    3. 启动 Uvicorn HTTP Server 或 交互式 Shell
 
     Args:
         config: Server configuration (host/port, ZMQ IPC addresses, etc).

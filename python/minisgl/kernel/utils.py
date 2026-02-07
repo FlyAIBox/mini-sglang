@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import pathlib
@@ -15,31 +16,41 @@ CPP_TEMPLATE_TYPE: TypeAlias = Union[int, float, bool]
 
 
 class CppArgList(list[str]):
+    """用于 C++ 模板参数的字符串列表"""
     def __str__(self) -> str:
         return ", ".join(self)
 
 
 class KernelConfig(NamedTuple):
-    num_threads: int
-    max_occupancy: int
-    use_pdl: bool
+    """
+    Kernel 配置
+    
+    用于生成 C++ 模板参数，不同的配置会编译成不同的 Kernel 实例。
+    """
+    num_threads: int    # 线程块大小 (blockDim.x)
+    max_occupancy: int  # 最大 occupancy 提示 (用于 launch bounds)
+    use_pdl: bool       # 是否使用 PDL 优化 (假设的优化选项)
 
     @property
     def template_args(self) -> str:
+        """生成 C++ 模板参数字符串"""
         pdl = "true" if self.use_pdl else "false"
         return f"{self.num_threads},{self.max_occupancy},{pdl}"
 
 
 def _make_name(*args: str) -> str:
+    """生成唯一的 Kernel 名称，基于参数签名"""
     return "minisgl__" + "_".join(str(arg) for arg in args)
 
 
 def _make_wrapper(tup: Tuple[str, str]) -> str:
+    """生成 C++ 包装函数代码，导出给 TVM FFI"""
     export_name, kernel_name = tup
     return f"TVM_FFI_DLL_EXPORT_TYPED_FUNC({export_name}, ({kernel_name}));"
 
 
 def make_cpp_args(*args: CPP_TEMPLATE_TYPE) -> CppArgList:
+    """转换 Python类型参数为 C++ 模板参数字符串"""
     def _convert(arg: CPP_TEMPLATE_TYPE) -> str:
         if isinstance(arg, bool):
             return "true" if arg else "false"
@@ -60,6 +71,13 @@ def load_aot(
     extra_include_paths: List[str] | None = None,
     build_directory: str | None = None,
 ) -> Module:
+    """
+    加载 AOT (Ahead-Of-Time) 编译的 C++/CUDA 扩展
+    
+    用于编译那些不需要运行时特化 (如模板参数依赖运行时值) 的代码。
+    例如 NCCL wrapper, Radix tree logic。
+    使用 TVM FFI 进行编译和加载。
+    """
     from tvm_ffi.cpp import load
 
     cpp_files = cpp_files or []
@@ -69,6 +87,7 @@ def load_aot(
     extra_ldflags = extra_ldflags or []
     extra_include_paths = extra_include_paths or []
 
+    # 解析绝对路径
     cpp_files = [str((KERNEL_PATH / "src" / f).resolve()) for f in cpp_files]
     cuda_files = [str((KERNEL_PATH / "src" / f).resolve()) for f in cuda_files]
 
@@ -96,6 +115,13 @@ def load_jit(
     extra_include_paths: List[str] | None = None,
     build_directory: str | None = None,
 ) -> Module:
+    """
+    加载 JIT (Just-In-Time) 编译的 C++/CUDA 扩展
+    
+    用于编译需要根据运行时参数生成特定模板实例的 Kernel。
+    例如 Attention kernel (根据 head size, block size 等特化)。
+    代码通过 inline 方式包含，支持动态生成的 wrapper 代码。
+    """
     from tvm_ffi.cpp import load_inline
 
     cpp_files = cpp_files or []

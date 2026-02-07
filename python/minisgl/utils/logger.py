@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from functools import partial
@@ -15,7 +16,16 @@ def init_logger(
     use_pid: bool | None = None,
     use_tp_rank: bool | None = None,
 ):
-    """Initialize the logger for the module with colors and pretty formatting."""
+    """
+    初始化 Logger (带颜色和格式化)
+    
+    统一的日志初始化函数，支持:
+    - 自动彩色输出 (基于日志级别)
+    - 格式化的时间戳
+    - 自动附加 PID 和 TP Rank 信息
+    - 避免重复添加 Handler
+    - 防止日志传播到 root logger (避免重复打印)
+    """
     import logging
     import os
     import sys
@@ -50,15 +60,15 @@ def init_logger(
 
     # Color formatter class
     class ColorFormatter(logging.Formatter):
-        """Formatter with colors and pretty output"""
+        """带颜色的自定义日志格式化器"""
 
         # ANSI color codes
         COLORS = {
-            "DEBUG": "\033[36m",  # Cyan
-            "INFO": "\033[32m",  # Green
-            "WARNING": "\033[33m",  # Yellow
-            "ERROR": "\033[31m",  # Red
-            "CRITICAL": "\033[35m",  # Magenta
+            "DEBUG": "\033[36m",  # Cyan (青色)
+            "INFO": "\033[32m",  # Green (绿色)
+            "WARNING": "\033[33m",  # Yellow (黄色)
+            "ERROR": "\033[31m",  # Red (红色)
+            "CRITICAL": "\033[35m",  # Magenta (洋红)
         }
         RESET = "\033[0m"
         BOLD = "\033[1m"
@@ -66,30 +76,31 @@ def init_logger(
         def format(self, record):
             from minisgl.distributed import try_get_tp_info
 
-            # Format timestamp like SGLang: [YYYY-MM-DD|HH:MM:SS|pid=1234]
+            # 格式化时间戳: [YYYY-MM-DD|HH:MM:SS|pid=1234]
             timestamp = self.formatTime(record, "[%Y-%m-%d|%H:%M:%S{suffix}]")
             nonlocal tp_info
             tp_info = tp_info or try_get_tp_info()
+            # 如果是分布式环境，自动附加 Rank 信息
             if tp_info is not None and use_tp_rank is not False:
                 real_suffix = f"{suffix}|core|rank={tp_info.rank}"
             else:
                 real_suffix = suffix
             timestamp = timestamp.format(suffix=real_suffix)
 
-            # Get color for log level
+            # 获取日志级别颜色
             level_color = self.COLORS.get(record.levelname, "")
 
-            # Format the message
+            # 格式化消息体
             colored_level = f"{level_color}{record.levelname:<8}{self.RESET}"
             message = record.getMessage()
 
-            # Pretty format: [timestamp] LEVEL message
+            # 最终格式: [timestamp] LEVEL message
             return f"{self.BOLD}{timestamp}{self.RESET} {colored_level} {message}"
 
     logger = logging.getLogger(name)
     logger.setLevel(_LOG_LEVEL)
 
-    # Clear existing handlers to avoid duplicates
+    # 清除现有的 handlers，避免重复输出
     logger.handlers.clear()
 
     handler = logging.StreamHandler(sys.stdout)
@@ -97,22 +108,24 @@ def init_logger(
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    # Prevent propagation to root logger
+    # 禁止传播到 root logger
     logger.propagate = False
 
     def _call_rank0(msg, *args, _which, **kwargs):
+        """仅在 Rank 0 打印日志的辅助函数"""
         from minisgl.distributed import get_tp_info
 
         nonlocal tp_info
         tp_info = tp_info or get_tp_info()
         assert tp_info is not None, "TP info not set yet"
+        # 只有主进程才打印
         if tp_info.is_primary():
             getattr(logger, _which)(msg, *args, **kwargs)
 
     if TYPE_CHECKING:
 
         class WrapperLogger(logging.Logger):
-            """Custom logger to handle the color formatter."""
+            """自定义 Logger 类型提示，包含 rank0 方法"""
 
             def info_rank0(self, msg, *args, **kwargs): ...
             def warning_rank0(self, msg, *args, **kwargs): ...
@@ -121,6 +134,7 @@ def init_logger(
 
         return WrapperLogger(name)
     else:
+        # 动态绑定 rank0 方法
         logger.info_rank0 = partial(_call_rank0, _which="info")
         logger.debug_rank0 = partial(_call_rank0, _which="debug")
         logger.critical_rank0 = partial(_call_rank0, _which="critical")

@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import asyncio
@@ -17,15 +18,17 @@ logger = init_logger(__name__)
 
 @dataclass(frozen=True)
 class BenchmarkTrace:
-    timestamp: float
-    message: str  # unit (second)
-    output_length: int  # output length in tokens
-    input_length: int | None = None  # input length in tokens, optional
+    """单个请求的 trace 信息"""
+    timestamp: float    #请求发送的时间戳 (相对时间)
+    message: str        # 请求的 prompt 内容
+    output_length: int  # 期望的输出长度 (token 数)
+    input_length: int | None = None  # 输入长度 (token 数), 用于统计或 hack
 
 
 @dataclass(frozen=True)
 class BenchOneResult:
-    tics: List[float]
+    """单个请求的基准测试结果"""
+    tics: List[float]  # 时间戳列表: [start, first_token, token_2, ..., end]
     input_len: int
     output_len: int
 
@@ -63,10 +66,11 @@ class Counter:
 
 @dataclass
 class Console:
-    input_pbar: tqdm
-    output_pbar: tqdm
-    prefill_pbar: tqdm
-    decode_pbar: tqdm
+    """控制台进度条管理器"""
+    input_pbar: tqdm   # 发送请求进度
+    output_pbar: tqdm  # 完成请求进度
+    prefill_pbar: tqdm # Prefill token 进度
+    decode_pbar: tqdm  # Decode token 进度
     disabled: bool
     inflight_counter: Counter = field(default_factory=Counter)
     queue_counter: Counter = field(default_factory=Counter)
@@ -122,6 +126,7 @@ class BenchmarkResult:
 
 
 def make_console(num_requests: int, sum_output_length: int, use_pbar: bool = True) -> Console:
+    """创建并初始化控制台进度条"""
     BAR_FORMAT_0 = (
         "{desc:<10} {percentage:3.0f}%|{bar}|"
         " {n_fmt:>5}/{total_fmt} "
@@ -209,6 +214,14 @@ async def benchmark_one(
     extra_body: Dict[str, Any] | None = None,
     input_length: int | None = None,  # a hack to force input length
 ) -> RawResult:
+    """
+    对单个请求进行基准测试
+    
+    发送请求并记录以下时刻:
+    1. 发送请求前
+    2. 收到第一个 token (TTFT)
+    3. 收到后续每个 token (TPOT)
+    """
     if isinstance(pbar, bool):
         pbar = make_console(1, output_length, use_pbar=pbar)
     with pbar.inflight(1):
@@ -237,8 +250,10 @@ async def benchmark_one(
         async for _ in response:
             tics.append(time.perf_counter())
             if len(tics) == 2:
+                # 收到第一个 token，意味着 prefill 完成
                 pbar.update_prefill()
             elif len(tics) <= output_length + 1:
+                # 收到后续 token，意味着一次 decode 步骤
                 pbar.update_decode()
         return RawResult(
             input_len=input_length,
@@ -258,6 +273,7 @@ async def benchmark_one_batch(
     input_lengths: List[int | None] | None = None,
     pbar: Console | bool = True,
 ) -> List[RawResult]:
+    """并发测试一批请求"""
     if isinstance(output_lengths, int):
         output_lengths = [output_lengths] * len(prompts)
     if isinstance(pbar, bool):
@@ -291,6 +307,11 @@ async def benchmark_trace(
     *,
     pbar: Console | bool = True,
 ) -> List[RawResult]:
+    """
+    按照 Trace 重放请求负载
+    
+    模拟真实的请求到达模式 (按 timestamp 发送请求)。
+    """
     if isinstance(pbar, bool):
         sum_output_len = sum(msg.output_length for msg in msgs)
         pbar = make_console(len(msgs), sum_output_len, use_pbar=pbar)
@@ -299,6 +320,7 @@ async def benchmark_trace(
 
     async def benchmark_timed(msg: BenchmarkTrace):
         target = start + msg.timestamp - offset
+        # 等待直到预定的发送时间
         await asyncio.sleep(max(0, target - time.perf_counter()))
         return await benchmark_one(
             client, msg.message, msg.output_length, model, pbar=pbar, input_length=msg.input_length
@@ -321,6 +343,17 @@ def process_benchmark_results(
     raw_data: List[RawResult],
     tokenizer: Any = UNSET,
 ) -> BenchmarkResult | None:
+    """
+    处理和统计基准测试结果
+    
+    统计指标:
+    - ATTFT (Average Time To First Token): 平均首字符延迟
+    - TPOT (Time Per Output Token): 平均每个输出 token 的生成时间
+    - E2E (End-to-End Latency): 端到端延迟
+    - Throughput: 吞吐量 (token/s, req/s)
+    
+    打印 P50, P90, P99 分位数值。
+    """
     accum_times: List[float] = []
     first_times: List[float] = []
     results = [r.tics for r in raw_data]
@@ -329,7 +362,9 @@ def process_benchmark_results(
         for i in range(len(tics) - 1):
             diff = tics[i + 1] - tics[i]
             deltas.append(diff)
+        # 首个 token 的时间间隔 (Prefill time)
         first_times.append(deltas[0])
+        # 后续 token 的时间间隔 (Decode time)
         accum_times.extend(deltas[1:])
 
     e2e_times = [tics[-1] - tics[0] for tics in results]
@@ -410,6 +445,7 @@ def read_qwen_trace(
     n: int | None = None,
     dummy: bool = False,
 ) -> List[BenchmarkTrace]:
+    """读取 Qwen 格式的 trace 文件"""
     class JSONInput(BaseModel):
         chat_id: int
         parent_chat_id: int
@@ -448,6 +484,7 @@ def read_mooncake_trace(
     n: int | None = None,
     dummy: bool = False,
 ) -> List[BenchmarkTrace]:
+    """读取 Mooncake 格式的 trace 文件"""
     class JSONInput(BaseModel):
         timestamp: int
         input_length: int
@@ -480,6 +517,7 @@ def scale_traces(
     traces: List[BenchmarkTrace],
     scale: float,
 ) -> List[BenchmarkTrace]:
+    """调整 Trace 的时间戳间隔，用于模拟不同程度的并发压力"""
     min_tic = min(trace.timestamp for trace in traces)
     return sorted(
         [
@@ -496,6 +534,7 @@ def scale_traces(
 
 
 async def get_model_name(client: OpenAI) -> str:
+    """获取服务端模型名称"""
     async for model in client.models.list():
         return model.id
     raise ValueError("No models available")

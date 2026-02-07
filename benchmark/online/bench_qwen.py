@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import asyncio
@@ -22,6 +23,7 @@ URL = "https://raw.githubusercontent.com/alibaba-edu/qwen-bailian-usagetraces-an
 
 
 def download_qwen_trace(url: str) -> str:
+    """如果不存在则下载 Qwen trace 文件"""
     dir = Path(os.path.dirname(__file__))
     # download the file if not exists
     file_path = dir / "qwen_trace.jsonl"
@@ -35,15 +37,27 @@ def download_qwen_trace(url: str) -> str:
 
 
 async def main():
+    """
+    在线基准测试 (使用 Qwen Trace)
+    
+    使用真实的 Qwen 用户请求 trace 来测试 API Server 的性能。
+    支持按不同比例 (scale) 缩放请求速率，模拟不同负载下的表现。
+    """
     random.seed(42)  # reproducibility
     PORT = 1919
     N = 1000
     SCALES = [0.4, 0.5, 0.6, 0.7, 0.8, 1.6]  # from fast to slow
+    
+    # 连接到本地 API Server
     async with OpenAI(base_url=f"http://127.0.0.1:{PORT}/v1", api_key="") as client:
         MODEL = await get_model_name(client)
         tokenizer = AutoTokenizer.from_pretrained(MODEL)
+        
+        # 下载并读取 trace 数据
         TRACES = read_qwen_trace(download_qwen_trace(URL), tokenizer, n=N, dummy=True)
         logger.info(f"Start benchmarking with {N} requests using model {MODEL}...")
+        
+        # 按不同速率进行测试
         for scale in SCALES:
             traces = scale_traces(TRACES, scale)
             results = await benchmark_trace(client, traces, MODEL)

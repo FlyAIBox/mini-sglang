@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import argparse
@@ -13,22 +14,32 @@ from minisgl.utils import cached_load_hf_config, init_logger
 
 @dataclass(frozen=True)
 class ServerArgs(SchedulerConfig):
+    """
+    服务器配置参数
+    
+    继承自 SchedulerConfig，包含了调度器配置以及服务器特有的配置。
+    这些参数通常由命令行传入，用于配置整个推理系统的行为。
+    """
     server_host: str = "127.0.0.1"
     server_port: int = 1919
-    num_tokenizer: int = 0
+    num_tokenizer: int = 0  # Tokenizer 进程数量 (0 表示与 Detokenizer 共享)
     silent_output: bool = False
 
     @property
     def share_tokenizer(self) -> bool:
+        """是否共享 Tokenizer 和 Detokenizer (当 num_tokenizer == 0)"""
         return self.num_tokenizer == 0
 
     @property
     def zmq_frontend_addr(self) -> str:
+        """前端 (API Server) 接收 Tokenizer 消息的 ZMQ IPC 地址"""
         return "ipc:///tmp/minisgl_3" + self._unique_suffix
 
     @property
     def zmq_tokenizer_addr(self) -> str:
+        """Tokenizer 接收前端消息的 ZMQ IPC 地址"""
         if self.share_tokenizer:
+            # 如果共享，使用 Detokenizer 的地址
             return self.zmq_detokenizer_addr
         result = "ipc:///tmp/minisgl_4" + self._unique_suffix
         assert result != self.zmq_detokenizer_addr
@@ -36,30 +47,36 @@ class ServerArgs(SchedulerConfig):
 
     @property
     def tokenizer_create_addr(self) -> bool:
+        """是否由 Tokenizer 进程创建 ZMQ Socket (Bind)"""
         return self.share_tokenizer
 
     @property
     def backend_create_detokenizer_link(self) -> bool:
+        """是否由 Backend 创建 Detokenizer 链接"""
         return not self.share_tokenizer
 
     @property
     def frontend_create_tokenizer_link(self) -> bool:
+        """是否由 Frontend 创建 Tokenizer 链接"""
         return not self.share_tokenizer
 
     @property
     def distributed_addr(self) -> str:
+        """分布式通信 (PyNCCL) 的主节点地址"""
         return f"tcp://127.0.0.1:{self.server_port + 1}"
 
 
 def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bool]:
     """
-    Parse command line arguments and return an EngineConfig.
-
-    Args:
-        args: Command line arguments (e.g., sys.argv[1:])
-
-    Returns:
-        EngineConfig instance with parsed arguments
+    解析命令行参数并返回 ServerArgs
+    
+    参数:
+        args: 命令行参数列表 (例如 sys.argv[1:])
+        run_shell: 是否运行在 Shell 模式
+    
+    返回:
+        ServerArgs: 解析后的配置对象
+        run_shell: 是否启用 shell模式 (可能由参数 --shell-mode 覆盖)
     """
     from minisgl.attention import validate_backend
     from minisgl.kvcache import SUPPORTED_CACHE_MANAGER
@@ -206,6 +223,7 @@ def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bo
     # resolve some arguments
     run_shell |= kwargs.pop("shell_mode")
     if run_shell:
+        # Shell 模式下，强制单 batch 和禁用部分输出，以便于交互
         kwargs["cuda_graph_max_bs"] = 1
         kwargs["max_running_req"] = 1
         kwargs["silent_output"] = True
@@ -221,12 +239,14 @@ def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bo
     if (dtype_str := kwargs["dtype"]) != "auto":
         kwargs["dtype"] = DTYPE_MAP[dtype_str]
     else:
+        # 自动推断 data type
         dtype_or_str = cached_load_hf_config(kwargs["model_path"]).dtype
         if isinstance(dtype_or_str, str):
             kwargs["dtype"] = DTYPE_MAP[dtype_or_str]
         else:
             kwargs["dtype"] = dtype_or_str
 
+    # 初始化分布式信息 (TP)
     kwargs["tp_info"] = DistributedInfo(0, kwargs["tensor_parallel_size"])
     del kwargs["tensor_parallel_size"]
 
