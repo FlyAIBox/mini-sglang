@@ -10,8 +10,9 @@ import torch
 
 class BaseKVCache(ABC):
     """
-    Base class for key-value caches.
-    This class defines the interface for key-value caches used.
+    KV Cache 基类
+    
+    定义了 KV Cache 的通用接口。
     """
 
     @abstractmethod
@@ -61,70 +62,77 @@ class BaseCacheManager(ABC):
     @abstractmethod
     def match_prefix(self, input_ids: torch.Tensor) -> Tuple[BaseCacheHandle, torch.Tensor]:
         """
-        Match prefix and return the indices of the matched prefix in the cache.
-        This operation will not modify the cache.
-        The returned indices is only safe to use when the handle is locked.
-
+        前缀匹配
+        
+        查找 cache 中与 input_ids 匹配的最长前缀。
+        此操作不会修改 cache。
+        返回的 indices 仅在 handle 被锁定时安全使用。
+        
         Args:
-            input_ids (torch.Tensor): The input ids to match. Shape: (seq_len,)
+            input_ids (torch.Tensor): 输入的 token ids. Shape: (seq_len,)
         Returns:
-            handle (BaseCacheHandle): The handle to the matched prefix.
-            indices (torch.Tensor): The indices of the longest-matched prefix in the cache.
+            handle (BaseCacheHandle): 匹配到的前缀的句柄。
+            indices (torch.Tensor): cached 中最长匹配前缀的索引。
         """
 
     @abstractmethod
     def lock_handle(self, handle: BaseCacheHandle, unlock: bool = False) -> None:
         """
-        Lock or unlock a cache handle.
-        This operation will not modify the cache, but change the size info only.
-        When a handle is locked, it cannot be evicted.
-        Handles must be locked before the previously-returned tensor of `match_prefix` is used.
-        Otherwise it may be evicted by calling evict.
-
+        锁定或解锁缓存句柄
+        
+        此操作不会修改 cache 内容，只改变 size info (引用计数)。
+        当句柄被锁定时，它不能被驱逐。
+        在使用 match_prefix 返回的 tensor 之前，必须先锁定句柄。
+        否则可能会被 evict 操作驱逐。
+        
         Args:
-            handle (BaseCacheHandle): The cache handle to lock or unlock.
-            unlock (bool): Whether to unlock the handle. Defaults to False.
+            handle (BaseCacheHandle): 要锁定/解锁的句柄。
+            unlock (bool): 是否解锁。默认为 False。
         """
 
     @abstractmethod
     def insert_prefix(self, input_ids: torch.Tensor, indices: torch.Tensor) -> int:
         """
-        Insert a new prefix into the cache.
-        This operation will modify the cache.
+        插入新前缀到 cache
+        
+        此操作会修改 cache。
+        
         Args:
-            input_ids (torch.Tensor): The input ids to insert. Shape: (seq_len,)
-            indices (torch.Tensor): The indices to store the new prefix. Shape: (seq_len,)
+            input_ids (torch.Tensor): 要插入的 token ids. Shape: (seq_len,)
+            indices (torch.Tensor): 存储新前缀的索引。Shape: (seq_len,)
 
         Returns:
-            int: The length of prefix that is already in the cache. This part is not
-                 inserted, so the caller should free these indices.
+            int: 已经在 cache 中的前缀长度。这部分不需要插入，调用者应该释放对应的 indices。
         """
 
     @abstractmethod
     def evict(self, size: int) -> torch.Tensor:
         """
-        Evict some prefixes from the cache to free up space.
-        This operation will modify the cache.
-        Note that evict 0 is always safe and does nothing.
-        Note that the actual evict size may be larger than the requested size.
+        驱逐部分前缀以释放空间
+        
+        此操作会修改 cache。
+        特定的 evict 0 总是安全的且不做任何事。
+        注意实际驱逐的大小可能大于请求的大小。
+        
         Args:
-            size (int): The size to evict.
+            size (int): 需要驱逐的大小。
 
         Returns:
-            torch.Tensor: The indices evicted. Shape: (evict_size,)
+            torch.Tensor: 被驱逐的索引。Shape: (evict_size,)
         Raises:
-            RuntimeError: If the requested size is larger than the evictable size.
+            RuntimeError: 如果请求的大小大于可驱逐的大小。
         """
 
     @abstractmethod
     def reset(self) -> None:
-        """Reset the cache manager and the underlying cache."""
+        """重置 cache manager 和底层的 cache"""
 
     @property
     @abstractmethod
     def size_info(self) -> SizeInfo:
-        """Get the size information of the cache."""
+        """获取 cache 的大小信息"""
 
     @abstractmethod
     def check_integrity(self) -> None:
-        """Check the integrity of the cache. Raise an error if the cache is corrupted."""
+        """检查 cache 的完整性。如果损坏则抛出异常。"""
+

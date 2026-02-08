@@ -9,10 +9,11 @@ from .base import BaseKVCache, KVCacheLayout
 
 class MHAKVCache(BaseKVCache):
     """
-    Base class for key-value caches.
-    This class defines the interface for key-value caches used in LLMs.
+    KVCache 实现类 (Multi-Head Attention)
+    
+    用于存储和管理 Transformer 模型的 Key-Value Cache。
+    支持按层 (LayerFirst) 或按页 (PageFirst) 布局，但实际上底层存储统一优化为 PageFirst 风格。
     """
-
     def __init__(
         self,
         num_kv_heads: int,
@@ -40,6 +41,8 @@ class MHAKVCache(BaseKVCache):
                 )
             case _:
                 raise ValueError(f"Unsupported kv_layout: {kv_layout}")
+        # 统一视图: [2, num_layers, num_pages, 1, local_kv_heads, head_dim]
+        # 这里的 1 维度可能是为了兼容某些 kernel 或方便 view
         self._kv_buffer = kv_buffer.view(2, num_layers, num_pages, 1, local_kv_heads, head_dim)
         self._num_layers = num_layers
         self._k_buffer = self._kv_buffer[0]
@@ -56,6 +59,7 @@ class MHAKVCache(BaseKVCache):
     def store_kv(
         self, k: torch.Tensor, v: torch.Tensor, out_loc: torch.Tensor, layer_id: int
     ) -> None:
+        """存储 KV 到 Cache 中"""
         from minisgl.kernel import store_cache
 
         store_cache(
@@ -77,3 +81,4 @@ class MHAKVCache(BaseKVCache):
     @property
     def num_layers(self) -> int:
         return self._num_layers
+

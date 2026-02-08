@@ -44,6 +44,7 @@ class BenchOneResult:
 
 @dataclass(frozen=True)
 class RawResult:
+    """内部使用的原始测试结果"""
     input_len: int | None
     output_len: int
     message: str
@@ -52,6 +53,7 @@ class RawResult:
 
 @dataclass
 class Counter:
+    """简单的计数器"""
     current: int = 0
     history_max: int = 0
 
@@ -76,32 +78,38 @@ class Console:
     queue_counter: Counter = field(default_factory=Counter)
 
     def update_input(self, n=1):
+        """更新发送请求进度"""
         self.input_pbar.update(n)
         self.input_pbar.refresh()
         self.inflight_counter.inc(n)
         self.queue_counter.inc(n)
 
     def update_output(self, n=1):
+        """更新完成请求进度"""
         self.output_pbar.update(n)
         self.output_pbar.refresh()
         self.inflight_counter.dec(n)
 
     def update_prefill(self, n=1):
+        """更新 Prefill token 进度"""
         self.prefill_pbar.update(n)
         self.prefill_pbar.refresh()
         self.queue_counter.dec(n)
 
     def update_decode(self, n=1):
+        """更新 Decode token 进度"""
         self.decode_pbar.update(n)
 
     @contextmanager
     def inflight(self, n=1):
+        """Context Manager: 记录请求处理生命周期"""
         self.update_input(n)
         yield
         self.update_output(n)
 
     @contextmanager
     def log_stats(self):
+        """Context Manager: 结束时关闭进度条并打印统计信息"""
         yield
         self.input_pbar.close()
         self.output_pbar.close()
@@ -115,6 +123,7 @@ class Console:
 
 @dataclass(frozen=True)
 class BenchmarkResult:
+    """基准测试结果集合"""
     raw_data: List[BenchOneResult]
 
     def as_json(self) -> List[List[float]]:
@@ -137,6 +146,7 @@ def make_console(num_requests: int, sum_output_length: int, use_pbar: bool = Tru
     prefill_tokens = num_requests
     decode_tokens = sum_output_length - prefill_tokens
 
+    # 动态调整数字对齐宽度
     if len(str(decode_tokens)) > n_fmt_align:
         n_fmt_align = len(str(decode_tokens))
         BAR_FORMAT_0 = BAR_FORMAT_0.replace("{n_fmt:>5}", "{n_fmt:>" + str(n_fmt_align) + "}")
@@ -186,7 +196,7 @@ def make_console(num_requests: int, sum_output_length: int, use_pbar: bool = Tru
 
 
 def generate_prompt(tokenizer: Any, n: int) -> str:
-    """Generate a prompt of approximately `n` tokens using the provided tokenizer."""
+    """使用 tokenizer 生成大约 n 个 token 的随机 Prompt。"""
     vocab_size = tokenizer.vocab_size // 2
     token_ids = [random.randint(0, vocab_size) for _ in range(n - 1)]
 
@@ -229,7 +239,7 @@ async def benchmark_one(
             "ignore_eos": True,
             "top_k": 1,
         }
-        # this is an internal kwargs that might work for our system
+        # 这是一个内部 hack 参数，可能用于强制设置输入长度
         if input_length is not None:
             kwargs["input_length_override"] = input_length
         kwargs.update(extra_body or {})  # can override kwargs
@@ -538,3 +548,4 @@ async def get_model_name(client: OpenAI) -> str:
     async for model in client.models.list():
         return model.id
     raise ValueError("No models available")
+
