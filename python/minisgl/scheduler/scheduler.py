@@ -316,13 +316,31 @@ class Scheduler(SchedulerIOMixin):
 
     def _make_2d_indices(self, ranges: List[Tuple[int, int, int]]) -> torch.Tensor:
         """
-        辅助函数：构造展平的索引
+        辅助函数：构造展平的索引，用于批量访问 2D 张量（如 Page Table 或 Token Pool）
         
         将一组 (row, start_col, end_col) 范围转换为 1D 的 flat indices。
-        用于在展平的 Page Table 或 Token Pool 中进行批量读写。
+        用于在展平的 Page Table 或 Token Pool 中进行批量读写操作。
         
         Args:
             ranges: List of (row_idx, start_col, end_col)
+                - row_idx: 行索引（请求的 table_idx）
+                - start_col: 起始列索引（包含）
+                - end_col: 结束列索引（不包含，开区间）
+                
+        Returns:
+            torch.Tensor: 1D 展平索引，dtype=int32，在 GPU 上
+            
+        边界条件:
+            - ranges 不能为空列表
+            - 对于每个 (row, start, end): 必须满足 0 <= start < end
+            - row_idx 必须在有效范围内 [0, max_requests)
+            - end_col 必须 <= token_pool 的列数
+            
+        示例:
+            假设 token_pool 是 shape (4, 1024) 的张量（4个请求，每个最多1024 tokens）
+            ranges = [(0, 0, 5), (1, 0, 3)]
+            返回: [0, 1, 2, 3, 4, 1024, 1025, 1026]
+                 （第0个请求的前5个token + 第1个请求的前3个token 的展平索引）
         """
         STRIDE = self.token_pool.stride(0)
         needed_size = sum(end - begin for _, begin, end in ranges)

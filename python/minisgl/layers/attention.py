@@ -80,6 +80,9 @@ class AttentionLayer(StateLessOP):
         Returns:
             torch.Tensor: Attention 输出 [num_tokens, hidden_size]
         """
+        # 获取全局上下文
+        # ⚠️ 警告: 必须在 Engine.forward_batch 上下文管理器内调用此方法
+        # 否则 ctx.batch 会因未设置而抛出 AssertionError
         ctx = get_global_ctx()
         metadata = ctx.batch.attn_metadata
         

@@ -202,12 +202,32 @@ class RadixCacheManager(BaseCacheManager):
 
     def match_prefix(self, input_ids: torch.Tensor) -> Tuple[RadixCacheHandle, torch.Tensor]:
         """
-        前缀匹配 (Prefix Matching)
+        前缀匹配（Prefix Matching）
         
-        在树中寻找与 input_ids 匹配的最长前缀路径。
+        在 Radix Tree 中寻找与 input_ids 匹配的最长前缀路径，
+        从根节点开始，沿着匹配的路径向下遍历，找到最长匹配前缀对应的 Cache。
+        
+        Args:
+            input_ids: 输入的 Token ID 序列（1D Tensor，在 GPU 上）
         
         Returns:
-            Tuple: (匹配末端的节点句柄, 路径上所有节点的 KV Cache 索引拼接)
+            Tuple[RadixCacheHandle, torch.Tensor]:
+                - RadixCacheHandle: Cache 句柄，包含匹配的长度和节点信息
+                - torch.Tensor: 匹配的 KV Cache 物理页索引（拼接路径上所有节点的 value）
+        
+        时间复杂度:
+            O(L * log(B))，其中:
+            - L: 输入序列长度（input_ids 的长度）
+            - B: Radix Tree 的分支因子（平均每个节点的子节点数）
+            
+        空间复杂度:
+            O(H) - H 为树的高度，用于存储回溯路径上的 value 列表
+            
+        算法流程:
+            1. 从根节点开始，调用 _walk 找到最长匹配路径
+            2. 如果匹配长度为 0，直接返回空结果
+            3. 否则，从匹配节点回溯到根节点，收集路径上所有节点的 KV Cache 索引
+            4. 反转并拼接这些索引，返回完整的可复用 Cache
         """
         node, prefix_len = self._walk(input_ids)
         if prefix_len == 0:

@@ -31,17 +31,34 @@ logger = init_logger(__name__)
 
 class ChunkedReq(Req):
     """
-    分块请求 (Chunked Request)
+    分块请求（Chunked Request）
     
-    表示一个还未完成 Prefill 的请求。
-    它的 input_ids 只包含当前 Chunk 的 tokens。
-    这种请求不处于 Decode 阶段，因此不能 append 新 token。
+    表示一个尚未完成 Prefill 阶段的请求。
+    其 input_ids 只包含当前 Chunk 的 tokens，完整的 Prompt 会分多次处理。
+    
+    注意:
+        - 此类请求不处于 Decode 阶段，因此不能追加新生成的 token
+        - 在 Chunked Prefill 完成后，会转换为普通的 Req 对象
     """
     def append_host(self, next_token: torch.Tensor) -> None:
-        raise NotImplementedError("ChunkedReq should be sampled")
+        """
+        禁止向 ChunkedReq 追加 token
+        
+        Raises:
+            NotImplementedError: ChunkedReq 还在 Prefill 阶段，不应该被采样或追加 token
+        """
+        raise NotImplementedError(
+            "ChunkedReq is still in Prefill phase and should not be sampled. "
+            "This is likely a bug in the scheduler logic."
+        )
 
     def can_decode(self) -> bool:
-        """分块请求还没准备好进入Decode阶段"""
+        """
+        ChunkedReq 不能进入 Decode 阶段
+        
+        Returns:
+            bool: 始终返回 False，表示还未准备好解码
+        """
         return False
 
 
