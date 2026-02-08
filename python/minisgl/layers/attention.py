@@ -39,7 +39,12 @@ class AttentionLayer(StateLessOP):
         q_norm: RMSNorm | None = None,
         k_norm: RMSNorm | None = None,
     ):
-        # 确保头数能被 KV 头数整除 (GQA/MQA 要求)
+        # 确保 Query 头数能被 KV 头数整除，这是 GQA/MQA 机制的要求
+        # GQA (Grouped Query Attention): 多个 Query 头共享一组 KV 头，减少 KV Cache 显存占用
+        #   例如: 32 个 Q 头共享 8 个 KV 头，即每 4 个 Q 头共享 1 个 KV 头
+        # MQA (Multi-Query Attention): 所有 Query 头共享同一个 KV 头，显存占用最小
+        #   例如: 32 个 Q 头共享 1 个 KV 头
+        # 标准 MHA (Multi-Head Attention): Q 头数等于 KV 头数 (1:1 对应)
         assert num_qo_heads % num_kv_heads == 0
         self.layer_id = layer_id
         self.head_dim = head_dim

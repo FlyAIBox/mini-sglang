@@ -36,7 +36,26 @@ class ForwardOutput(NamedTuple):
 
 
 def create_page_table(shape: Tuple[int, int], device: torch.device) -> torch.Tensor:
-    """创建页表张量，用于映射逻辑页到物理页"""
+    """
+    创建页表张量，用于 PagedAttention 的逻辑页到物理页映射
+    
+    PagedAttention 将 KV Cache 组织为固定大小的"页"（类似操作系统的分页内存）。
+    页表维护每个请求的逻辑页索引到物理页索引的映射关系。
+    
+    Args:
+        shape: (max_requests, max_seq_len) 页表形状
+            - max_requests: 支持的最大并发请求数
+            - max_seq_len: 支持的最大序列长度（以 token 为单位）
+        device: 页表所在的 GPU 设备
+        
+    Returns:
+        torch.Tensor: 初始化为 0 的页表，shape 为 (max_requests, max_seq_len)，
+                     dtype 为 int32。值 0 表示未分配的页。
+    
+    注意:
+        - 页表索引从 1 开始，0 保留作为"未分配"状态
+        - 实际使用中，页表会动态更新以反映当前的页映射关系
+    """
     return torch.zeros(shape, dtype=torch.int32, device=device)
 
 
