@@ -509,3 +509,135 @@ python3 -m sglang.launch_server --model "Qwen/Qwen3-32B" --tp 4 \
 - **[开发者指南](./docs/zh/developer.md)**：面向开发者的代码结构、调试技巧和贡献指南
 - **[文档总结](./docs/zh/SUMMARY.md)**：中文文档和代码注释的完整说明
 
+## 🔧 项目配置文件说明
+
+Mini-SGLang 使用现代 Python 项目管理工具和配置文件来确保代码质量和开发效率。以下是主要配置文件及其作用：
+
+### `pyproject.toml` - 项目配置中心
+
+这是项目的**核心配置文件**，采用现代 Python 打包标准（PEP 518/621），统一管理项目的所有配置。
+
+**主要功能：**
+
+1. **项目元数据**：定义项目名称、版本、描述、许可证等基本信息
+2. **依赖管理**：声明核心依赖和开发依赖，支持版本约束
+   - `dependencies`：运行时必需的核心依赖（PyTorch、FastAPI、FlashInfer 等）
+   - `optional-dependencies.dev`：开发工具依赖（pytest、black、ruff 等）
+3. **工具配置**：集中配置代码质量工具
+   - `[tool.black]`：代码格式化配置（行长100字符，Python 3.10+）
+   - `[tool.ruff]`：快速 linter 配置（代码风格检查、导入排序）
+   - `[tool.pytest]`：测试框架配置（测试路径、覆盖率报告）
+   - `[tool.mypy]`：类型检查配置（严格模式、类型覆盖）
+
+**为什么重要：** 单一配置文件减少了配置碎片化，确保所有开发者使用一致的工具设置。
+
+### `requirements.txt` - 生产环境依赖
+
+列出**运行 Mini-SGLang 所必需的核心依赖**，适用于生产部署。
+
+**依赖分类：**
+
+- **深度学习框架**：PyTorch、Transformers、Accelerate
+- **CUDA 优化**：sgl_kernel、flashinfer、TVM FFI
+- **Web 服务**：FastAPI、Uvicorn、OpenAI SDK
+- **通信**：ZeroMQ、MessagePack
+- **CLI**：prompt_toolkit
+
+**使用场景：**
+```bash
+# 生产环境安装
+pip install -r requirements.txt
+```
+
+### `requirements-dev.txt` - 开发环境依赖
+
+包含**开发、测试和代码质量工具**的完整依赖列表。
+
+**额外工具：**
+
+- **测试工具**：pytest、pytest-cov、pytest-asyncio
+- **代码格式化**：black、ruff、flake8
+- **类型检查**：mypy
+- **Git 钩子**：pre-commit
+- **数据分析**：matplotlib、numpy
+
+**使用场景：**
+```bash
+# 开发环境安装（包含所有依赖）
+pip install -r requirements.txt -r requirements-dev.txt
+```
+
+### `.pre-commit-config.yaml` - Git 提交前检查
+
+配置 **Git pre-commit 钩子**，在每次提交代码前自动执行代码质量检查。
+
+**检查项目：**
+
+1. **基础检查**（via pre-commit-hooks）：
+   - 删除行尾空格
+   - 确保文件以换行符结尾
+   - 验证 YAML/TOML 语法
+   - 检测大文件、合并冲突、私钥泄漏
+
+2. **Python 代码格式化**（via black）：
+   - 自动格式化 Python 代码为统一风格
+
+3. **Python 代码检查**（via ruff）：
+   - 快速检查代码风格问题
+   - 自动修复简单问题（如导入排序）
+
+4. **C++/CUDA 代码格式化**（via clang-format）：
+   - 格式化自定义 CUDA 内核代码
+
+**激活方法：**
+```bash
+# 安装 pre-commit 钩子
+pip install pre-commit
+pre-commit install
+
+# 手动运行所有检查
+pre-commit run --all-files
+```
+
+**为什么重要：** 在提交前自动捕获代码质量问题，确保所有提交的代码符合项目规范，减少 code review 负担。
+
+### `.python-version` - Python 版本管理
+
+指定项目**推荐的 Python 版本**（3.12）。
+
+**作用：**
+
+- 被 `pyenv`、`asdf` 等版本管理工具自动识别
+- 确保团队使用一致的 Python 版本
+- 避免因 Python 版本差异导致的兼容性问题
+
+**使用示例（with pyenv）：**
+```bash
+# pyenv 会自动读取 .python-version
+cd mini-sglang
+pyenv install  # 安装指定版本
+python --version  # Python 3.12.x
+```
+
+---
+
+### 配置文件之间的关系
+
+```
+pyproject.toml (主配置)
+    ├── 定义所有依赖 → requirements.txt (生产)
+    │                 └── requirements-dev.txt (开发)
+    │
+    ├── 配置代码工具 → .pre-commit-config.yaml (Git 钩子)
+    │                 └── black, ruff, pytest, mypy
+    │
+    └── 指定 Python → .python-version
+```
+
+**最佳实践：**
+
+1. **日常开发**：安装 `requirements-dev.txt` 获得完整开发环境
+2. **启用 pre-commit**：确保代码质量从源头把控
+3. **生产部署**：仅安装 `requirements.txt` 减小镜像体积
+4. **版本管理**：使用 `pyenv` 或 `uv` 自动管理 Python 版本
+

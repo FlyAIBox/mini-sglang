@@ -1,154 +1,331 @@
+# ============================================================================
+# pyproject.toml - Python 项目配置文件
+# ============================================================================
+# 这是现代 Python 项目的标准配置文件（PEP 518/621）
+# 它统一管理项目的构建、依赖、工具配置等所有设置
+# 相比传统的 setup.py，pyproject.toml 更加现代化和标准化
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# [build-system] 构建系统配置
+# ----------------------------------------------------------------------------
+# 定义如何构建（打包）这个 Python 项目
+# 当你运行 `pip install .` 或 `python -m build` 时，这些设置会被使用
 [build-system]
+# requires: 构建项目时需要预先安装的工具
+# setuptools: Python 最常用的打包工具（类似于 Java 的 Maven）
+# wheel: 用于创建 .whl 格式的二进制分发包（比 .tar.gz 安装更快）
 requires = ["setuptools>=61.0", "wheel"]
+# build-backend: 指定实际执行构建的后端模块
+# setuptools.build_meta 是 setuptools 提供的标准构建接口
 build-backend = "setuptools.build_meta"
 
+# ----------------------------------------------------------------------------
+# [project] 项目基本信息
+# ----------------------------------------------------------------------------
+# 定义项目的元数据，这些信息会显示在 PyPI（Python 包索引）上
 [project]
+# 项目名称（安装时使用：pip install minisgl）
 name = "minisgl"
+# 版本号（遵循语义化版本：主版本.次版本.修订号）
+# 0.1.0 表示：初始开发版本，API 可能不稳定
 version = "0.1.0"
+# 项目简短描述（一句话说明项目是什么）
 description = "A lightweight yet high-performance inference framework for Large Language Models"
+# README 文件路径（详细文档，会显示在 PyPI 项目页面）
 readme = "README.md"
+# Python 版本要求（>=3.10 表示至少需要 Python 3.10）
+# 因为代码中使用了类型注解等新特性
 requires-python = ">=3.10"
+# 许可证（MIT 是最宽松的开源许可证之一）
 license = {text = "MIT"}
+# PyPI 分类标签（帮助用户在 PyPI 上找到你的项目）
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
+    "Development Status :: 3 - Alpha",  # 开发状态：Alpha（早期版本）
+    "Intended Audience :: Developers",  # 目标用户：开发者
+    "Intended Audience :: Science/Research",  # 目标用户：科研人员
+    "License :: OSI Approved :: MIT License",  # 许可证类型
+    "Programming Language :: Python :: 3",  # 编程语言
+    "Programming Language :: Python :: 3.10",  # 支持的具体 Python 版本
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",  # 主题：AI
+    "Topic :: Software Development :: Libraries :: Python Modules",  # 主题：Python 库
 ]
+
+# ----------------------------------------------------------------------------
+# dependencies - 运行时依赖（生产环境必需）
+# ----------------------------------------------------------------------------
+# 这些包是运行 Mini-SGLang 所必需的
+# 安装项目时（pip install minisgl）会自动安装这些依赖
 dependencies = [
+    # ========================================
     # 深度学习框架
-    "torch>=2.0.0,<2.6.0",                  # PyTorch 核心框架
-    "transformers>=4.56.0,<=4.57.3",        # HuggingFace Transformers
-    "accelerate>=0.34.0",                    # 分布式训练和推理加速
+    # ========================================
+    # PyTorch: 深度学习的核心框架，提供张量运算和自动微分
+    # 版本约束：>=2.0.0（至少2.0）且 <2.6.0（小于2.6，避免不兼容）
+    "torch>=2.0.0,<2.6.0",
     
+    # Transformers: HuggingFace 的预训练模型库
+    # 提供 Llama、Qwen 等模型的下载和加载功能
+    "transformers>=4.56.0,<=4.57.3",
+    
+    # Accelerate: 分布式训练和推理的加速库
+    # 简化多 GPU 和混合精度训练的配置
+    "accelerate>=0.34.0",
+    
+    # ========================================
     # CUDA 和 GPU 优化
-    "sgl_kernel>=0.3.17.post1",             # SGLang 自定义 CUDA 内核
-    "flashinfer-python>=0.5.3",             # FlashInfer 注意力优化内核
-    "nvidia-cutlass-dsl==4.3.1",            # NVIDIA CUTLASS DSL
-    "apache-tvm-ffi>=0.1.4",                # Apache TVM FFI
+    # ========================================
+    # sgl_kernel: SGLang 团队开发的自定义 CUDA 内核
+    # 提供优化的张量操作和内存管理
+    "sgl_kernel>=0.3.17.post1",
     
-    # Web 服务
-    "fastapi>=0.115.0",                      # FastAPI Web 框架
-    "uvicorn>=0.32.0",                       # ASGI 服务器
-    "openai>=1.57.4",                        # OpenAI API 客户端
+    # flashinfer-python: FlashInfer 注意力机制的 Python 绑定
+    # 提供高性能的 Paged Attention 实现（比标准注意力快2-3倍）
+    "flashinfer-python>=0.5.3",
     
+    # nvidia-cutlass-dsl: NVIDIA CUTLASS 领域特定语言
+    # 用于生成高性能的 CUDA 内核代码
+    "nvidia-cutlass-dsl==4.3.1",
+    
+    # apache-tvm-ffi: Apache TVM 的 Python FFI（外部函数接口）
+    # 用于调用编译好的 CUDA 内核
+    "apache-tvm-ffi>=0.1.4",
+    
+    # ========================================
+    # Web 服务框架
+    # ========================================
+    # FastAPI: 现代、快速的 Web 框架
+    # 用于构建 RESTful API 服务器（/v1/chat/completions 端点）
+    "fastapi>=0.115.0",
+    
+    # Uvicorn: ASGI 服务器（类似于 Flask 的 Werkzeug）
+    # 用于运行 FastAPI 应用，支持异步和高并发
+    "uvicorn>=0.32.0",
+    
+    # OpenAI: OpenAI 官方 Python SDK
+    # 提供 OpenAI API 的客户端实现（我们用它做兼容性测试）
+    "openai>=1.57.4",
+    
+    # ========================================
     # 数据序列化和通信
-    "msgpack>=1.1.0",                        # MessagePack 序列化
-    "pyzmq>=26.2.0",                         # ZeroMQ Python 绑定
+    # ========================================
+    # MessagePack: 高效的二进制序列化格式（比 JSON 更快更小）
+    # 用于进程间消息的序列化
+    "msgpack>=1.1.0",
     
+    # PyZMQ: ZeroMQ 的 Python 绑定
+    # 提供高性能的消息队列（用于 API Server、Tokenizer、Scheduler 间通信）
+    "pyzmq>=26.2.0",
+    
+    # ========================================
     # 命令行界面
-    "prompt_toolkit>=3.0.36",                # 交互式命令行界面
+    # ========================================
+    # prompt_toolkit: 强大的交互式命令行工具包
+    # 用于实现 --shell 模式的交互式对话界面
+    "prompt_toolkit>=3.0.36",
 ]
 
+# ----------------------------------------------------------------------------
+# [project.optional-dependencies] 可选依赖
+# ----------------------------------------------------------------------------
+# 这些依赖不是运行所必需的，但用于特定场景
+# 安装方式：pip install minisgl[dev]  # 安装开发依赖
 [project.optional-dependencies]
+# dev: 开发环境依赖（用于代码开发、测试、调试）
 dev = [
+    # ========================================
     # 测试工具
-    "pytest>=8.3.0",                         # 单元测试框架
-    "pytest-cov>=6.0.0",                     # 测试覆盖率
-    "pytest-asyncio>=0.24.0",                # 异步测试支持
+    # ========================================
+    # pytest: Python 最流行的测试框架
+    # 用于编写和运行单元测试、集成测试
+    "pytest>=8.3.0",
     
-    # 代码质量和格式化
-    "black>=24.8.0",                         # 代码格式化工具
-    "ruff>=0.11.0",                          # 快速 Python linter
-    "flake8>=7.1.0",                         # 代码风格检查
-    "mypy>=1.13.0",                          # 静态类型检查
-    "pre-commit>=4.0.0",                     # Git 预提交钩子
+    # pytest-cov: pytest 的代码覆盖率插件
+    # 生成测试覆盖率报告（哪些代码被测试了，哪些没有）
+    "pytest-cov>=6.0.0",
     
-    # 性能分析和可视化
-    "matplotlib>=3.10.5",                    # 绘图和可视化
-    "numpy>=1.26.0",                         # 数值计算
+    # pytest-asyncio: pytest 的异步支持插件
+    # 用于测试异步函数（FastAPI 的端点都是异步的）
+    "pytest-asyncio>=0.24.0",
+    
+    # ========================================
+    # 代码质量和格式化工具
+    # ========================================
+    # black: 代码格式化工具（自动格式化 Python 代码）
+    # 确保代码风格一致，减少 code review 中的格式争议
+    "black>=24.8.0",
+    
+    # ruff: 极快的 Python linter（代码检查工具）
+    # 比 flake8 快 10-100 倍，可以自动修复部分问题
+    "ruff>=0.11.0",
+    
+    # flake8: 传统的代码风格检查工具
+    # 检查 PEP 8 规范、未使用的导入、代码复杂度等
+    "flake8>=7.1.0",
+    
+    # mypy: 静态类型检查工具
+    # 检查类型注解是否正确，提前发现类型相关的 bug
+    "mypy>=1.13.0",
+    
+    # pre-commit: Git pre-commit 钩子管理工具
+    # 在 git commit 前自动运行 black、ruff 等工具
+    "pre-commit>=4.0.0",
+    
+    # ========================================
+    # 性能分析和数据可视化
+    # ========================================
+    # matplotlib: Python 最流行的绘图库
+    # 用于可视化性能指标、生成性能对比图表
+    "matplotlib>=3.10.5",
+    
+    # numpy: 科学计算基础库
+    # 提供高效的数组运算（matplotlib 也依赖它）
+    "numpy>=1.26.0",
 ]
 
+# ----------------------------------------------------------------------------
+# [tool.setuptools] setuptools 配置
+# ----------------------------------------------------------------------------
+# 配置 setuptools 如何查找和打包代码
 [tool.setuptools]
+# 包含非 Python 文件（如 CUDA 内核源码）
 include-package-data = true
+# 指定包的根目录（代码在 python/ 目录下）
 package-dir = {"" = "python"}
 
+# 自动发现包的配置
 [tool.setuptools.packages.find]
+# 在 python/ 目录下查找所有 Python 包
 where = ["python"]
 
+# 指定要包含的额外文件
 [tool.setuptools.package-data]
+# 包含所有包中的 csrc/ 目录下的文件（CUDA 源码）
+# csrc/**/* 表示 csrc 及其所有子目录下的所有文件
 "*" = ["csrc/**/*"]
 
+# ----------------------------------------------------------------------------
+# [tool.black] black 代码格式化配置
+# ----------------------------------------------------------------------------
+# black 是一个"零配置"的代码格式化工具，但仍可自定义一些选项
 [tool.black]
+# 每行最大字符数（默认 88，这里设为 100 以适应更多场景）
 line-length = 100
+# 目标 Python 版本（会影响语法选择，如是否使用 match/case）
 target-version = ['py310']
-include = '\.pyi?$'
+# 要格式化的文件模式（.py 和 .pyi 类型存根文件）
+include = '\\.pyi?$'
+# 排除的目录（不格式化这些目录）
 extend-exclude = '''
 /(
   # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
+  \\.eggs          # setuptools 生成的临时文件
+  | \\.git         # git 仓库目录
+  | \\.hg          # mercurial 仓库目录
+  | \\.mypy_cache  # mypy 缓存
+  | \\.tox         # tox 测试环境
+  | \\.venv        # 虚拟环境
+  | build         # 构建产物
+  | dist          # 分发包
 )/
 '''
 
+# ----------------------------------------------------------------------------
+# [tool.ruff] ruff linter 配置
+# ----------------------------------------------------------------------------
+# ruff 是一个极快的 Python linter，可替代 flake8、isort 等多个工具
 [tool.ruff]
+# 目标 Python 版本
 target-version = "py310"
+# 每行最大字符数（与 black 保持一致）
 line-length = 100
+# 启用的检查规则（每个字母/数字组合代表一类规则）
 lint.select = [
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "C4", # flake8-comprehensions
+    "W",   # pycodestyle warnings（代码风格警告）
+    "F",   # pyflakes（检查未使用的导入、未定义的变量等）
+    "I",   # isort（自动排序和分组 import 语句）
+    "C4",  # flake8-comprehensions（检查列表/字典推导式的写法）
 ]
+# 忽略的规则（即使违反也不报错）
 lint.ignore = [
-    "E501",  # line too long, handled by black
-    "B008",  # do not perform function calls in argument defaults
-    "C901",  # too complex
+    "E501",  # line too long（行太长）- 由 black 处理，这里忽略
+    "B008",  # do not perform function calls in argument defaults（不要在默认参数中调用函数）
+    "C901",  # too complex（函数太复杂）- 有时复杂逻辑是必要的
 ]
+# 排除的目录（不检查这些目录）
 exclude = [
-    ".git",
-    ".venv",
-    "build",
-    "dist",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
+    ".git",           # git 仓库
+    ".venv",          # 虚拟环境
+    "build",          # 构建产物
+    "dist",           # 分发包
+    "__pycache__",    # Python 缓存
+    ".pytest_cache",  # pytest 缓存
+    ".mypy_cache",    # mypy 缓存
 ]
 
+# ----------------------------------------------------------------------------
+# [tool.pytest] pytest 测试框架配置
+# ----------------------------------------------------------------------------
+# pytest 是 Python 最流行的测试框架
 [tool.pytest.ini_options]
+# 测试文件所在目录
 testpaths = ["tests"]
+# 测试文件命名模式（匹配这些模式的文件会被识别为测试文件）
 python_files = ["test_*.py", "*_test.py"]
+# 测试类命名模式（以 Test 开头的类）
 python_classes = ["Test*"]
+# 测试函数命名模式（以 test_ 开头的函数）
 python_functions = ["test_*"]
+# 额外的命令行选项（每次运行 pytest 都会自动应用）
 addopts = [
-    "--strict-markers",
-    "--strict-config",
-    "--cov=minisgl",
-    "--cov-report=term-missing",
-    "--cov-report=html",
+    "--strict-markers",            # 严格模式：未注册的 marker 会报错
+    "--strict-config",             # 严格配置：配置错误会报错而非警告
+    "--cov=minisgl",               # 生成 minisgl 包的代码覆盖率
+    "--cov-report=term-missing",   # 在终端显示未覆盖的代码行
+    "--cov-report=html",           # 生成 HTML 格式的覆盖率报告
 ]
 
+# ----------------------------------------------------------------------------
+# [tool.mypy] mypy 静态类型检查配置
+# ----------------------------------------------------------------------------
+# mypy 检查 Python 类型注解是否正确，帮助提前发现类型错误
 [tool.mypy]
+# 目标 Python 版本
 python_version = "3.10"
+# 警告：函数返回值未注解类型
 warn_return_any = true
+# 警告：配置项未使用
 warn_unused_configs = true
+# 不允许：函数定义没有类型注解
 disallow_untyped_defs = true
+# 不允许：函数定义类型注解不完整
 disallow_incomplete_defs = true
+# 检查：即使函数没有类型注解也检查其内部
 check_untyped_defs = true
+# 不允许：装饰器没有类型注解
 disallow_untyped_decorators = true
+# 不允许：隐式的 Optional（必须显式写 Optional[T]）
 no_implicit_optional = true
+# 警告：冗余的类型转换
 warn_redundant_casts = true
+# 警告：未使用的 # type: ignore 注释
 warn_unused_ignores = true
+# 警告：函数执行路径可能没有返回值
 warn_no_return = true
+# 警告：无法到达的代码
 warn_unreachable = true
+# 严格的相等性检查
 strict_equality = true
 
+# 针对特定模块的配置覆盖
 [[tool.mypy.overrides]]
+# 这些第三方库没有类型存根（type stubs），忽略它们的导入错误
 module = [
-    "torch.*",
-    "transformers.*",
-    "datasets.*",
+    "torch.*",           # PyTorch 的类型注解不完整
+    "transformers.*",    # Transformers 的类型注解不完整
+    "datasets.*",        # Datasets 的类型注解不完整
 ]
+# 忽略这些模块的导入错误（找不到类型信息不报错）
 ignore_missing_imports = true
