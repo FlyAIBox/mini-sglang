@@ -100,8 +100,7 @@ conda activate minisgl
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/sgl-project/mini-sglang.git
-cd mini-sglang
+git clone https://github.com/FlyAIBox/mini-sglang.git
 
 # 2. 激活虚拟环境
 source .venv/bin/activate  # 或使用conda环境
